@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Clip Curator – AI Lecture Summarizer</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     PAGE 1: LOGIN
+═══════════════════════════════════════════ -->
+<div id="page-login" class="page active">
+  <div class="login-wrap">
+
+    <div class="login-left">
+      <div class="brand">
+        <span class="brand-icon">✂</span>
+        <span class="brand-name">Clip Curator</span>
+      </div>
+      <h1>Turn long lectures into<br/><span class="accent">instant insights.</span></h1>
+      <p class="login-desc">Paste any YouTube lecture link — get topic summaries, timestamps, and jump links in seconds. Powered by AI.</p>
+      <ul class="features">
+        <li>⚡ Instant AI summarization</li>
+        <li>🎯 Topic-by-topic breakdown</li>
+        <li>🔗 Jump to exact moments on YouTube</li>
+        <li>🔖 Save and search your clips library</li>
+      </ul>
+    </div>
+
+    <div class="login-right">
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button class="auth-tab active" onclick="switchTab('login')">Sign In</button>
+          <button class="auth-tab" onclick="switchTab('signup')">Sign Up</button>
+        </div>
+
+        <!-- Login Form -->
+        <div id="form-login">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" id="login-user" placeholder="Enter username"/>
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="login-pass" placeholder="Enter password"/>
+          </div>
+          <button class="btn-primary full" onclick="handleLogin()">Sign In</button>
+          <p id="login-error" class="err hidden">Incorrect username or password.</p>
+        </div>
+
+        <!-- Signup Form -->
+        <div id="form-signup" class="hidden">
+          <div class="field">
+            <label>Username</label>
+            <input type="text" id="signup-user" placeholder="Choose a username"/>
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="signup-pass" placeholder="Choose a password"/>
+          </div>
+          <button class="btn-primary full" onclick="handleSignup()">Create Account</button>
+          <p id="signup-error" class="err hidden"></p>
+          <p id="signup-success" class="succ hidden"></p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     PAGE 2: MAIN APP (Dashboard + Results)
+═══════════════════════════════════════════ -->
+<div id="page-app" class="page hidden">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <span class="brand-icon small">✂</span>
+      <span class="brand-name">Clip Curator</span>
+    </div>
+    <div class="nav-links">
+      <button class="nav-btn active" id="nav-home" onclick="showAppSection('home')">🏠 Home</button>
+      <button class="nav-btn" id="nav-library" onclick="showAppSection('library')">🔖 My Library</button>
+    </div>
+    <div class="nav-user-area">
+      <span class="user-pill">👤 <span id="nav-username"></span></span>
+      <button class="btn-signout" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </nav>
+
+  <!-- ── HOME SECTION ── -->
+  <div id="section-home">
+
+    <!-- URL Input Hero -->
+    <div class="hero">
+      <h1 class="hero-title">Curate your <span class="accent-red">YouTube</span> experience.</h1>
+      <p class="hero-sub">Paste a lecture or talk link below to get AI-powered topic summaries and timestamps.</p>
+
+      <div class="url-bar">
+        <span class="url-icon">▶</span>
+        <input type="text" id="url-input" placeholder="https://www.youtube.com/watch?v=..."/>
+        <button class="btn-analyze" id="analyze-btn" onclick="analyzeVideo()">Analyze →</button>
+      </div>
+
+      <div id="loading-area" class="hidden">
+        <div class="loader-wrap">
+          <div class="spinner"></div>
+          <div class="loader-steps">
+            <p id="loader-text">Fetching video info...</p>
+          </div>
+        </div>
+      </div>
+
+      <p id="analyze-error" class="err hidden"></p>
+    </div>
+
+    <!-- Results Area (hidden until analysis done) -->
+    <div id="results-area" class="hidden">
+
+      <!-- Video Info Card -->
+      <div class="video-card">
+        <img id="result-thumbnail" src="" alt="thumbnail" class="thumbnail"/>
+        <div class="video-meta">
+          <h2 id="result-title"></h2>
+          <p id="result-channel" class="muted"></p>
+          <p id="result-duration" class="muted"></p>
+          <span id="result-method" class="method-badge"></span>
+        </div>
+      </div>
+
+      <!-- Overall Summary -->
+      <div class="section-card">
+        <h3 class="section-title">📋 Overall Summary</h3>
+        <ul id="overall-summary-list" class="summary-bullets"></ul>
+      </div>
+
+      <!-- Topics -->
+      <div class="section-card">
+        <div class="topics-header">
+          <h3 class="section-title">🎯 Topics & Notes</h3>
+          <span id="topics-count" class="count-badge"></span>
+        </div>
+        <div id="topics-list"></div>
+      </div>
+
+      <!-- Clip Downloader -->
+      <div class="section-card" id="clip-section">
+        <h3 class="section-title">✂️ Clip Downloader</h3>
+        <div id="clip-unavailable" class="clip-notice hidden">
+          ⚠️ Clip download is only available for videos under 10 minutes.
+        </div>
+        <div id="clip-form">
+          <p class="muted">Enter timestamps to cut and download a short MP4 clip from this video.</p>
+          <div class="clip-inputs">
+            <div class="field">
+              <label>From (MM:SS)</label>
+              <input type="text" id="clip-start" placeholder="e.g. 0:30"/>
+            </div>
+            <div class="field">
+              <label>To (MM:SS)</label>
+              <input type="text" id="clip-end" placeholder="e.g. 1:30"/>
+            </div>
+            <button class="btn-primary" onclick="downloadClip()">⬇ Download Clip</button>
+          </div>
+          <p id="clip-status" class="muted hidden"></p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── LIBRARY SECTION ── -->
+  <div id="section-library" class="hidden">
+    <div class="library-wrap">
+      <div class="library-top">
+        <h2>🔖 My Saved Clips</h2>
+        <div class="search-wrap">
+          <span>🔍</span>
+          <input type="text" id="search-input" placeholder="Search your saved clips..." oninput="searchLibrary()"/>
+        </div>
+      </div>
+      <div id="library-list">
+        <p class="empty-msg">No saved clips yet. Analyze a video and save topics you like!</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+
+<script src="script.js"></script>
+</body>
+</html>

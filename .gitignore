@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+database/bookmarks.db
+audio/
+clips/
+*.mp3
+*.mp4
+.DS_Store
