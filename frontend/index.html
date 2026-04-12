@@ -147,12 +147,24 @@
         </div>
         <div id="topics-list"></div>
       </div>
+      
+      <!-- Report Download -->
+<div class="section-card" id="report-section">
+  <h3 class="section-title">📄 Download Report</h3>
+  <p class="muted">Get a full PDF report with summaries, charts, topic breakdown and jump links for this video.</p>
+  <div style="margin-top:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <button class="btn-primary" onclick="downloadReport()" id="report-btn">
+      ⬇ Download PDF Report
+    </button>
+    <p id="report-status" class="muted hidden"></p>
+  </div>
+</div>
 
       <!-- Clip Downloader -->
       <div class="section-card" id="clip-section">
         <h3 class="section-title">✂️ Clip Downloader</h3>
         <div id="clip-unavailable" class="clip-notice hidden">
-          ⚠️ Clip download is only available for videos under 10 minutes.
+          ℹ️ For videos over 10 minutes — clips are limited to 5 minutes max and may take longer to process.
         </div>
         <div id="clip-form">
           <p class="muted">Enter timestamps to cut and download a short MP4 clip from this video.</p>

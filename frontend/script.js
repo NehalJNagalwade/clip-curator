@@ -292,13 +292,13 @@ function displayResults(data) {
   const clipForm = document.getElementById('clip-form');
   const clipNotice = document.getElementById('clip-unavailable');
 
-  if (data.duration > 600) {
-    // Video is over 10 minutes — disable clip
-    clipForm.classList.add('hidden');
-    clipNotice.classList.remove('hidden');
-  } else {
-    clipForm.classList.remove('hidden');
-    clipNotice.classList.add('hidden');
+  // Show clip for all videos, just show notice for long ones
+clipForm.classList.remove('hidden');
+if (data.duration > 600) {
+  clipNotice.classList.remove('hidden');
+} else {
+  clipNotice.classList.add('hidden');
+
     document.getElementById('clip-status').classList.add('hidden');
   }
 
@@ -353,6 +353,56 @@ async function saveTopic(index) {
     btn.textContent = "🔖 Save";
     btn.disabled = false;
     alert("Error connecting to backend.");
+  }
+}
+
+// ── DOWNLOAD PDF REPORT ──────────────────────────────────────────────────────
+
+async function downloadReport() {
+  if (!currentResult) return;
+
+  const btn = document.getElementById('report-btn');
+  const statusEl = document.getElementById('report-status');
+
+  btn.textContent = '⏳ Generating Report...';
+  btn.disabled = true;
+  statusEl.textContent = 'Building your PDF — this takes 10-20 seconds...';
+  statusEl.style.color = '#888';
+  statusEl.classList.remove('hidden');
+
+  try {
+    const res = await fetch(`${API}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(currentResult)
+    });
+
+    if (res.ok) {
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `ClipCurator_${currentResult.video_id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+      statusEl.textContent = '✅ Report downloaded!';
+      statusEl.style.color = '#4ade80';
+      btn.textContent = '⬇ Download PDF Report';
+      btn.disabled = false;
+    } else {
+      const err = await res.json();
+      statusEl.textContent = '❌ ' + (err.error || 'Report generation failed.');
+      statusEl.style.color = '#ff6b6b';
+      btn.textContent = '⬇ Download PDF Report';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ Error connecting to backend.';
+    statusEl.style.color = '#ff6b6b';
+    btn.textContent = '⬇ Download PDF Report';
+    btn.disabled = false;
   }
 }
 
