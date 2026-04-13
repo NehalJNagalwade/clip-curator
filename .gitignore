@@ -1,12 +1,11 @@
 venv/
 __pycache__/
 *.pyc
-*.pyo
 .env
 database/bookmarks.db
 audio/
 clips/
+reports/
 *.mp3
 *.mp4
-.DS_Store
-reports/
+requirements-local.txt

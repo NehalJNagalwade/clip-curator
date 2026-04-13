@@ -2,8 +2,9 @@ services:
   - type: web
     name: clip-curator
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: cd backend && gunicorn app:app --timeout 300
+    startCommand: cd backend && gunicorn app:app --timeout 120 --workers 1
     envVars:
       - key: GROQ_API_KEY
         sync: false
