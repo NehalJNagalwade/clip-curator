@@ -3,7 +3,7 @@
 // Connects frontend to Flask backend
 // ═══════════════════════════════════════════
 
-const API = "http://localhost:5000";
+const API = "https://clip-curator.onrender.com";
 
 // Stores current logged-in username
 let currentUser = "";
