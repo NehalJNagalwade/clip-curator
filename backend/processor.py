@@ -288,10 +288,8 @@ def summarize_transcript(transcript_segments, video_title, video_duration):
                 return parse_ai_response(ai_response, video_duration)
             except Exception as gemini_error:
                 raise Exception(
-                    f"Both AI services failed. "
-                    f"Groq: {groq_error}. "
-                    f"Gemini: {gemini_error}"
-                )
+    f"AI summarization failed. Please try again in a few minutes. Error: {groq_error}"
+)
         else:
             raise Exception(
                 f"Groq failed and no Gemini key configured. Error: {groq_error}"
