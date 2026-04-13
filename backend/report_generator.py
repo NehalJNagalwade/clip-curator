@@ -654,7 +654,7 @@ def build_jump_links(story, styles, topics, width):
             Paragraph(
                 t.get('title','?')[:40] + ('…' if len(t.get('title','')) > 40 else ''),
                 S(f'ln{i}', fontName='Helvetica', fontSize=8.5,
-                  textColor=GRAY_700 if i % 2 else GRAY_800, alignment=TA_LEFT)
+                  textColor=GRAY_600 if i % 2 else GRAY_800, alignment=TA_LEFT)
             ),
         ]
         cell = Table([
