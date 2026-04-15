@@ -1,7 +1,7 @@
 # app.py — Clip Curator Backend (Complete Final Version)
 
 import os
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from dotenv import load_dotenv
 from database import (
@@ -18,6 +18,24 @@ init_db()
 
 REPORTS_FOLDER = os.path.join(os.path.dirname(__file__), '..', 'reports')
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
+
+# Frontend folder path
+FRONTEND_PATH = os.path.join(os.path.dirname(__file__), '..', 'frontend')
+
+# ── SERVE FRONTEND ────────────────────────────────────────────────────────────
+
+@app.route('/')
+def serve_frontend():
+    """Serve the main HTML page — fixes 404 on Render"""
+    return send_from_directory(FRONTEND_PATH, 'index.html')
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    """Serve CSS, JS and other static files"""
+    try:
+        return send_from_directory(FRONTEND_PATH, filename)
+    except Exception:
+        return jsonify({"error": "Not found"}), 404
 
 # ── AUTH ROUTES ───────────────────────────────────────────────────────────────
 
@@ -151,15 +169,9 @@ def create_clip_route():
 
 @app.route("/report", methods=["POST"])
 def generate_report_route():
-    """
-    Generates a PDF report for a video.
-    Frontend sends the full video analysis data.
-    Returns the PDF file for download.
-    """
     data = request.get_json()
     if not data or 'video_id' not in data:
         return jsonify({"error": "Video data required"}), 400
-
     try:
         from report_generator import generate_report
         video_id = data.get('video_id', 'unknown')

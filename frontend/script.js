@@ -3,11 +3,7 @@
 // Connects frontend to Flask backend
 // ═══════════════════════════════════════════
 
-// Works on both your computer and Render
-const API = (window.location.hostname === "localhost" || 
-             window.location.hostname === "127.0.0.1")
-            ? "http://localhost:5000"
-            : "https://clip-curator.onrender.com";
+const API = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" ? "http://127.0.0.1:5000" : "https://clip-curator.onrender.com";
 
 // Stores current logged-in username
 let currentUser = "";
