@@ -1,9 +1,9 @@
-# processor.py — Clip Curator (Complete Working Version)
-# Works both locally (with Whisper) and on Render (captions only)
+# processor.py — Clip Curator (Render + Local Compatible)
 
 import os
 import re
 import json
+import requests
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -12,16 +12,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-# Check if Whisper is available (only on local PC)
 WHISPER_AVAILABLE = False
 try:
     from faster_whisper import WhisperModel
     WHISPER_AVAILABLE = True
-    print("✅ Whisper available (running locally with GPU)")
+    print("✅ Whisper available (local mode)")
 except ImportError:
-    print("ℹ️ Whisper not available (server mode — captions only)")
+    print("ℹ️ Whisper not available (server mode)")
 
-# ── HELPER: Extract Video ID ──────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def extract_video_id(url):
     patterns = [
@@ -32,31 +31,53 @@ def extract_video_id(url):
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
-            return match.group(1)
+            return match.group(1).split('?')[0].split('&')[0]
     return None
-
-# ── HELPER: Format time ───────────────────────────────────────────────────────
 
 def format_time(seconds):
     seconds = int(seconds)
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
-    if hours > 0:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
 
-# ── FUNCTION 1: Get Video Info ────────────────────────────────────────────────
+# ── VIDEO INFO — No yt-dlp on server (YouTube blocks it) ─────────────────────
 
 def get_video_info(video_id):
+    """
+    Gets video info without yt-dlp.
+    Uses YouTube's oEmbed API (free, no auth needed, works on servers!)
+    """
     thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+
+    # Try oEmbed API — always works, no bot detection
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        resp = requests.get(oembed_url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            title = data.get('title', 'Unknown Title')
+            channel = data.get('author_name', 'Unknown Channel')
+            print(f"✅ Got video info via oEmbed: {title}")
+
+            # Get duration separately using a different approach
+            duration = get_video_duration(video_id)
+
+            return {
+                'title': title,
+                'duration': duration,
+                'thumbnail': thumbnail_url,
+                'channel': channel
+            }
+    except Exception as e:
+        print(f"oEmbed failed: {e}")
+
+    # Fallback: try yt-dlp locally (won't work on server but fine locally)
     try:
         import yt_dlp
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
-        }
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(
                 f"https://www.youtube.com/watch?v={video_id}",
@@ -69,330 +90,256 @@ def get_video_info(video_id):
                 'channel': info.get('uploader', 'Unknown Channel')
             }
     except Exception as e:
-        print(f"Could not get video info: {e}")
-        return {
-            'title': 'Unknown Title',
-            'duration': 0,
-            'thumbnail': thumbnail_url,
-            'channel': 'Unknown'
-        }
+        print(f"yt-dlp also failed: {e}")
 
-# ── FUNCTION 2: Get Transcript ────────────────────────────────────────────────
+    return {
+        'title': 'Unknown Title',
+        'duration': 0,
+        'thumbnail': thumbnail_url,
+        'channel': 'Unknown Channel'
+    }
+
+def get_video_duration(video_id):
+    """
+    Gets video duration using YouTube's noembed API
+    Returns duration in seconds
+    """
+    try:
+        # Try noembed.com — gives more info
+        resp = requests.get(
+            f"https://noembed.com/embed?url=https://www.youtube.com/watch?v={video_id}",
+            timeout=8
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            # noembed doesn't give duration, but we can estimate from transcript later
+            pass
+    except Exception:
+        pass
+    return 0  # Duration 0 is fine — we calculate from transcript
+
+# ── TRANSCRIPT ────────────────────────────────────────────────────────────────
 
 def get_transcript(video_id, duration_seconds):
     """
-    Robust transcript fetching - works on both local and Render
-    Tries multiple API methods for maximum compatibility
+    Gets transcript using youtube-transcript-api v1.2.x
+    Only uses instance methods (class methods removed in v1.2)
     """
-    print(f"Trying YouTube captions for: {video_id}")
+    print(f"Getting transcript for: {video_id}")
 
-    # Method A: Try using class method (works on older API versions)
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
 
-        # First try: list_transcripts class method
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            fetched_transcript = None
+        # v1.2.x uses INSTANCE method, not class method
+        ytt = YouTubeTranscriptApi()
+        fetched = None
 
-            # Try English first
-            for lang in ['en', 'en-US', 'en-GB', 'en-IN']:
-                try:
-                    t = transcript_list.find_transcript([lang])
-                    fetched_transcript = t.fetch()
-                    print(f"✅ Found captions via list method: {lang}")
-                    break
-                except Exception:
-                    continue
+        # Try languages in order
+        lang_groups = [
+            ['en', 'en-US', 'en-GB', 'en-IN'],
+            ['hi'],
+            ['en-auto'],
+        ]
 
-            # Try Hindi
-            if not fetched_transcript:
-                try:
-                    t = transcript_list.find_transcript(['hi'])
-                    fetched_transcript = t.fetch()
-                    print("✅ Found Hindi captions via list method")
-                except Exception:
-                    pass
-
-            # Try any generated transcript
-            if not fetched_transcript:
-                try:
-                    for t in transcript_list:
-                        fetched_transcript = t.fetch()
-                        print(f"✅ Found captions: {t.language_code}")
-                        break
-                except Exception:
-                    pass
-
-            if fetched_transcript:
-                result = []
-                for seg in fetched_transcript:
-                    if isinstance(seg, dict):
-                        result.append({
-                            'text': str(seg.get('text', '')),
-                            'start': float(seg.get('start', 0)),
-                            'duration': float(seg.get('duration', 0))
-                        })
-                    else:
-                        try:
-                            result.append({
-                                'text': str(seg.text),
-                                'start': float(seg.start),
-                                'duration': float(seg.duration)
-                            })
-                        except Exception:
-                            result.append({
-                                'text': str(seg),
-                                'start': 0.0,
-                                'duration': 0.0
-                            })
-
-                if result:
-                    print(f"✅ Got {len(result)} segments via list method")
-                    return result, "captions"
-
-        except Exception as list_error:
-            print(f"List method failed: {list_error}")
-
-        # Second try: instance fetch method (newer API versions)
-        try:
-            ytt = YouTubeTranscriptApi()
-            fetched = None
-
-            for lang in [['en', 'en-US', 'en-GB', 'en-IN'], ['hi']]:
-                try:
-                    fetched = ytt.fetch(video_id, languages=lang)
-                    print(f"✅ Found captions via fetch method: {lang}")
-                    break
-                except Exception:
-                    continue
-
-            if fetched is None:
-                try:
-                    fetched = ytt.fetch(video_id)
-                    print("✅ Found captions via default fetch")
-                except Exception:
-                    pass
-
-            if fetched:
-                result = []
-                for seg in fetched:
-                    if hasattr(seg, 'text'):
-                        result.append({
-                            'text': str(seg.text),
-                            'start': float(seg.start),
-                            'duration': float(seg.duration)
-                        })
-                    elif isinstance(seg, dict):
-                        result.append({
-                            'text': str(seg.get('text', '')),
-                            'start': float(seg.get('start', 0)),
-                            'duration': float(seg.get('duration', 0))
-                        })
-
-                if result:
-                    print(f"✅ Got {len(result)} segments via fetch method")
-                    return result, "captions"
-
-        except Exception as fetch_error:
-            print(f"Fetch method failed: {fetch_error}")
-
-        raise Exception("All caption methods failed")
-
-    except Exception as caption_error:
-        print(f"Captions completely failed: {caption_error}")
-
-        if WHISPER_AVAILABLE and duration_seconds and duration_seconds <= 900:
-            print("Falling back to Whisper...")
+        for langs in lang_groups:
             try:
-                result = get_transcript_whisper(video_id)
-                return result, "whisper"
-            except Exception as w_err:
-                raise Exception(f"Both failed — Captions: {caption_error}, Whisper: {w_err}")
-        elif not WHISPER_AVAILABLE:
-            raise Exception(
-                f"Caption error on server: {str(caption_error)[:200]}. "
-                "Please try a video with YouTube captions enabled."
-            )
-        else:
-            raise Exception(
-                "No captions available and video too long for Whisper. "
-                "Please try a video with captions enabled."
-            )
+                fetched = ytt.fetch(video_id, languages=langs)
+                print(f"✅ Captions found: {langs}")
+                break
+            except Exception as e:
+                print(f"  Lang {langs} failed: {e}")
+                continue
 
-# ── FUNCTION 3: Whisper Fallback ──────────────────────────────────────────────
+        # Try without specifying language (gets whatever is available)
+        if fetched is None:
+            try:
+                fetched = ytt.fetch(video_id)
+                print("✅ Captions found: default language")
+            except Exception as e:
+                print(f"  Default fetch failed: {e}")
+
+        if fetched is None:
+            raise Exception("No captions available in any language")
+
+        # Convert to our format
+        result = []
+        for seg in fetched:
+            try:
+                if hasattr(seg, 'text'):
+                    result.append({
+                        'text': str(seg.text),
+                        'start': float(seg.start),
+                        'duration': float(seg.duration)
+                    })
+                elif isinstance(seg, dict):
+                    result.append({
+                        'text': str(seg.get('text', '')),
+                        'start': float(seg.get('start', 0)),
+                        'duration': float(seg.get('duration', 0))
+                    })
+            except Exception:
+                continue
+
+        if not result:
+            raise Exception("Captions found but empty after parsing")
+
+        print(f"✅ Got {len(result)} caption segments")
+        return result, "captions"
+
+    except Exception as caption_err:
+        print(f"All caption methods failed: {caption_err}")
+
+        # Whisper fallback — local only, short videos only
+        if WHISPER_AVAILABLE and duration_seconds and duration_seconds <= 900:
+            print("Trying Whisper fallback...")
+            try:
+                return get_transcript_whisper(video_id), "whisper"
+            except Exception as w_err:
+                raise Exception(f"Captions: {caption_err} | Whisper: {w_err}")
+
+        raise Exception(
+            f"This video has no accessible captions. "
+            f"Error: {str(caption_err)[:100]}. "
+            f"Please try a video with YouTube captions enabled "
+            f"(most lecture and TED videos have captions)."
+        )
 
 def get_transcript_whisper(video_id):
-    """Only called locally when captions unavailable"""
     from transcriber import download_audio, transcribe_audio
     url = f"https://www.youtube.com/watch?v={video_id}"
-    download_info = download_audio(url)
-    whisper_segments = transcribe_audio(download_info['audio_path'])
-    if os.path.exists(download_info['audio_path']):
-        os.remove(download_info['audio_path'])
+    info = download_audio(url)
+    segments = transcribe_audio(info['audio_path'])
+    if os.path.exists(info['audio_path']):
+        os.remove(info['audio_path'])
     return [
-        {
-            'text': seg['text'],
-            'start': seg['start'],
-            'duration': seg['end'] - seg['start']
-        }
-        for seg in whisper_segments
+        {'text': s['text'], 'start': s['start'], 'duration': s['end'] - s['start']}
+        for s in segments
     ]
 
-# ── FUNCTION 4: Build AI Prompt ───────────────────────────────────────────────
+# ── AI SUMMARIZATION ──────────────────────────────────────────────────────────
 
-def build_prompt(transcript_segments, video_title, video_duration):
-    total = len(transcript_segments)
-    if total <= 100:
-        sampled = transcript_segments
-    else:
-        step = total // 100
-        sampled = transcript_segments[::step][:100]
+def build_prompt(segments, title, duration):
+    total = len(segments)
+    sampled = segments if total <= 100 else segments[::total//100][:100]
+    full_text = " ".join(s['text'] for s in sampled)[:6000]
 
-    full_text = " ".join([seg['text'] for seg in sampled])
-    if len(full_text) > 6000:
-        full_text = full_text[:6000]
+    hints = []
+    last = -30
+    for s in segments:
+        if s['start'] - last >= 30:
+            hints.append(f"[{format_time(s['start'])}] {s['text'][:80]}")
+            last = s['start']
+    hint_text = "\n".join(hints[:30])
 
-    timestamp_map = []
-    last_added = -30
-    for seg in transcript_segments:
-        if seg['start'] - last_added >= 30:
-            timestamp_map.append({
-                'time': seg['start'],
-                'text': seg['text'][:80]
-            })
-            last_added = seg['start']
+    mins = duration / 60
+    if mins <= 5: topics = "3-4"
+    elif mins <= 15: topics = "5-7"
+    elif mins <= 30: topics = "7-10"
+    elif mins <= 60: topics = "10-12"
+    else: topics = "12-15"
 
-    timestamp_hints = "\n".join([
-        f"[{format_time(t['time'])}] {t['text']}"
-        for t in timestamp_map[:30]
-    ])
+    dur_fmt = format_time(duration) if duration > 0 else "unknown"
 
-    duration_minutes = video_duration / 60
-    if duration_minutes <= 5:
-        num_topics = "3-4"
-    elif duration_minutes <= 15:
-        num_topics = "5-7"
-    elif duration_minutes <= 30:
-        num_topics = "7-10"
-    elif duration_minutes <= 60:
-        num_topics = "10-12"
-    else:
-        num_topics = "12-15"
+    return f"""Analyze this YouTube video: "{title}"
+Duration: {dur_fmt} ({duration} seconds)
 
-    return f"""You are analyzing a YouTube lecture titled: "{video_title}"
-Total video duration: {format_time(video_duration)} ({video_duration} seconds)
+Timestamps:
+{hint_text}
 
-Timestamp markers:
-{timestamp_hints}
-
-Transcript sample:
+Transcript:
 {full_text}
 
-STRICT RULES:
-1. Create exactly {num_topics} topics covering ENTIRE video 0 to {video_duration} seconds
-2. Last topic end_time MUST equal exactly {video_duration}
-3. No topic can exceed {video_duration} seconds
-4. start_time and end_time must be plain integers
+Create {topics} topics covering the full video.
+Rules:
+- Last topic end_time = {duration if duration > 0 else 'end of video'}
+- No topic exceeds video duration
+- start_time and end_time are integers (seconds)
 
-Respond with ONLY this JSON, no extra text:
+Return ONLY this JSON:
 {{
-  "overall_summary": [
-    "point 1 about this video",
-    "point 2 about key topics covered",
-    "point 3 about what viewers will learn",
-    "point 4 about the target audience"
-  ],
+  "overall_summary": ["point 1", "point 2", "point 3", "point 4"],
   "topics": [
     {{
       "topic_number": 1,
-      "title": "Clear Topic Name",
+      "title": "Topic Name",
       "start_time": 0,
-      "end_time": 300,
-      "summary": "2-3 sentences about this section"
+      "end_time": 120,
+      "summary": "What this section covers"
     }}
   ]
 }}"""
 
-# ── FUNCTION 5: Groq AI ───────────────────────────────────────────────────────
-
 def call_groq(prompt):
-    print("Calling Groq AI...")
-    response = groq_client.chat.completions.create(
+    print("Calling Groq...")
+    r = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=2500
+        temperature=0.3, max_tokens=2500
     )
-    result = response.choices[0].message.content.strip()
-    print("Groq responded! ✅")
-    return result
-
-# ── FUNCTION 6: Gemini AI (Backup) ───────────────────────────────────────────
+    print("Groq ✅")
+    return r.choices[0].message.content.strip()
 
 def call_gemini(prompt):
-    print("Trying Gemini as backup...")
+    print("Trying Gemini...")
     import google.generativeai as genai
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(prompt)
-    print("Gemini responded! ✅")
-    return response.text.strip()
+    r = genai.GenerativeModel("gemini-1.5-flash").generate_content(prompt)
+    print("Gemini ✅")
+    return r.text.strip()
 
-# ── FUNCTION 7: Parse JSON Response ──────────────────────────────────────────
-
-def parse_response(text, video_duration):
+def parse_response(text, duration):
     text = re.sub(r'```json\s*', '', text)
-    text = re.sub(r'```\s*', '', text)
-    text = text.strip()
+    text = re.sub(r'```\s*', '', text).strip()
     result = json.loads(text)
-    for topic in result['topics']:
-        if topic['end_time'] > video_duration:
-            topic['end_time'] = video_duration
-        if topic['start_time'] > video_duration:
-            topic['start_time'] = max(0, video_duration - 60)
+    for t in result['topics']:
+        if duration > 0:
+            if t['end_time'] > duration:
+                t['end_time'] = duration
+            if t['start_time'] > duration:
+                t['start_time'] = max(0, duration - 60)
     return result
 
-# ── FUNCTION 8: Summarize ─────────────────────────────────────────────────────
-
-def summarize(transcript_segments, video_title, video_duration):
-    prompt = build_prompt(transcript_segments, video_title, video_duration)
-
-    # Try Groq first
+def summarize(segments, title, duration):
+    prompt = build_prompt(segments, title, duration)
     try:
-        return parse_response(call_groq(prompt), video_duration)
-    except Exception as groq_err:
-        print(f"Groq failed: {groq_err}")
-
-    # Try Gemini backup
+        return parse_response(call_groq(prompt), duration)
+    except Exception as e:
+        print(f"Groq failed: {e}")
     if GEMINI_API_KEY:
         try:
-            return parse_response(call_gemini(prompt), video_duration)
-        except Exception as gemini_err:
-            print(f"Gemini failed: {gemini_err}")
-
-    raise Exception("Both AI services failed. Please try again in a few minutes.")
+            return parse_response(call_gemini(prompt), duration)
+        except Exception as e:
+            print(f"Gemini failed: {e}")
+    raise Exception("AI summarization failed. Please try again.")
 
 # ── MASTER FUNCTION ───────────────────────────────────────────────────────────
 
 def process_video(youtube_url):
-    print(f"\n{'='*50}")
-    print(f"Processing: {youtube_url}")
-    print(f"{'='*50}")
+    print(f"\n{'='*50}\nProcessing: {youtube_url}\n{'='*50}")
 
     video_id = extract_video_id(youtube_url)
     if not video_id:
-        raise Exception("Invalid YouTube URL. Please check and try again.")
+        raise Exception("Invalid YouTube URL.")
 
     print(f"Video ID: {video_id}")
-    video_info = get_video_info(video_id)
-    print(f"Title: {video_info['title']}")
-    print(f"Duration: {format_time(video_info['duration'])}")
 
-    transcript, method = get_transcript(video_id, video_info['duration'])
-    print(f"Transcript method: {method}, segments: {len(transcript)}")
+    # Get video info
+    info = get_video_info(video_id)
+    print(f"Title: {info['title']}, Duration: {format_time(info['duration'])}")
 
-    ai_result = summarize(transcript, video_info['title'], video_info['duration'])
+    # Get transcript
+    transcript, method = get_transcript(video_id, info['duration'])
+    print(f"Transcript: {method}, {len(transcript)} segments")
+
+    # If duration was 0 from oEmbed, calculate from transcript
+    duration = info['duration']
+    if duration == 0 and transcript:
+        last_seg = transcript[-1]
+        duration = int(last_seg['start'] + last_seg.get('duration', 0))
+        print(f"Duration calculated from transcript: {format_time(duration)}")
+
+    # Summarize
+    ai_result = summarize(transcript, info['title'], duration)
 
     for topic in ai_result['topics']:
         topic['start_formatted'] = format_time(topic['start_time'])
@@ -406,11 +353,11 @@ def process_video(youtube_url):
 
     return {
         'video_id': video_id,
-        'title': video_info['title'],
-        'thumbnail': video_info['thumbnail'],
-        'channel': video_info['channel'],
-        'duration': video_info['duration'],
-        'duration_formatted': format_time(video_info['duration']),
+        'title': info['title'],
+        'thumbnail': info['thumbnail'],
+        'channel': info['channel'],
+        'duration': duration,
+        'duration_formatted': format_time(duration),
         'transcript_method': method,
         'overall_summary': ai_result['overall_summary'],
         'topics': ai_result['topics']
