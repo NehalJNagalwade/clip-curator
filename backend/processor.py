@@ -81,84 +81,142 @@ def get_video_info(video_id):
 
 def get_transcript(video_id, duration_seconds):
     """
-    Tries to get transcript using youtube-transcript-api v1.2.x
-    Falls back to Whisper if no captions (local only, under 15 min)
+    Robust transcript fetching - works on both local and Render
+    Tries multiple API methods for maximum compatibility
     """
     print(f"Trying YouTube captions for: {video_id}")
 
-    # youtube-transcript-api v1.2.x uses instance method
+    # Method A: Try using class method (works on older API versions)
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        ytt = YouTubeTranscriptApi()
 
-        fetched = None
+        # First try: list_transcripts class method
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            fetched_transcript = None
 
-        # Try English variants first
-        for lang in [['en', 'en-US', 'en-GB', 'en-IN'], ['hi'], ['en-auto']]:
-            try:
-                fetched = ytt.fetch(video_id, languages=lang)
-                print(f"✅ Found captions: {lang}")
-                break
-            except Exception:
-                continue
+            # Try English first
+            for lang in ['en', 'en-US', 'en-GB', 'en-IN']:
+                try:
+                    t = transcript_list.find_transcript([lang])
+                    fetched_transcript = t.fetch()
+                    print(f"✅ Found captions via list method: {lang}")
+                    break
+                except Exception:
+                    continue
 
-        # Last resort — fetch any available language
-        if fetched is None:
-            try:
-                # Get all available transcripts
-                fetched = ytt.fetch(video_id)
-                print("✅ Found captions in default language")
-            except Exception:
-                pass
+            # Try Hindi
+            if not fetched_transcript:
+                try:
+                    t = transcript_list.find_transcript(['hi'])
+                    fetched_transcript = t.fetch()
+                    print("✅ Found Hindi captions via list method")
+                except Exception:
+                    pass
 
-        if fetched is None:
-            raise Exception("No captions found")
+            # Try any generated transcript
+            if not fetched_transcript:
+                try:
+                    for t in transcript_list:
+                        fetched_transcript = t.fetch()
+                        print(f"✅ Found captions: {t.language_code}")
+                        break
+                except Exception:
+                    pass
 
-        # Convert segments — handle both object and dict format
-        result = []
-        for seg in fetched:
-            if hasattr(seg, 'text'):
-                result.append({
-                    'text': str(seg.text),
-                    'start': float(seg.start),
-                    'duration': float(seg.duration)
-                })
-            elif isinstance(seg, dict):
-                result.append({
-                    'text': str(seg.get('text', '')),
-                    'start': float(seg.get('start', 0)),
-                    'duration': float(seg.get('duration', 0))
-                })
+            if fetched_transcript:
+                result = []
+                for seg in fetched_transcript:
+                    if isinstance(seg, dict):
+                        result.append({
+                            'text': str(seg.get('text', '')),
+                            'start': float(seg.get('start', 0)),
+                            'duration': float(seg.get('duration', 0))
+                        })
+                    else:
+                        try:
+                            result.append({
+                                'text': str(seg.text),
+                                'start': float(seg.start),
+                                'duration': float(seg.duration)
+                            })
+                        except Exception:
+                            result.append({
+                                'text': str(seg),
+                                'start': 0.0,
+                                'duration': 0.0
+                            })
 
-        if result:
-            print(f"✅ Got {len(result)} caption segments")
-            return result, "captions"
-        else:
-            raise Exception("Empty captions")
+                if result:
+                    print(f"✅ Got {len(result)} segments via list method")
+                    return result, "captions"
+
+        except Exception as list_error:
+            print(f"List method failed: {list_error}")
+
+        # Second try: instance fetch method (newer API versions)
+        try:
+            ytt = YouTubeTranscriptApi()
+            fetched = None
+
+            for lang in [['en', 'en-US', 'en-GB', 'en-IN'], ['hi']]:
+                try:
+                    fetched = ytt.fetch(video_id, languages=lang)
+                    print(f"✅ Found captions via fetch method: {lang}")
+                    break
+                except Exception:
+                    continue
+
+            if fetched is None:
+                try:
+                    fetched = ytt.fetch(video_id)
+                    print("✅ Found captions via default fetch")
+                except Exception:
+                    pass
+
+            if fetched:
+                result = []
+                for seg in fetched:
+                    if hasattr(seg, 'text'):
+                        result.append({
+                            'text': str(seg.text),
+                            'start': float(seg.start),
+                            'duration': float(seg.duration)
+                        })
+                    elif isinstance(seg, dict):
+                        result.append({
+                            'text': str(seg.get('text', '')),
+                            'start': float(seg.get('start', 0)),
+                            'duration': float(seg.get('duration', 0))
+                        })
+
+                if result:
+                    print(f"✅ Got {len(result)} segments via fetch method")
+                    return result, "captions"
+
+        except Exception as fetch_error:
+            print(f"Fetch method failed: {fetch_error}")
+
+        raise Exception("All caption methods failed")
 
     except Exception as caption_error:
-        print(f"Captions failed: {caption_error}")
+        print(f"Captions completely failed: {caption_error}")
 
-        # Whisper fallback — only local, only short videos
         if WHISPER_AVAILABLE and duration_seconds and duration_seconds <= 900:
-            print("Falling back to Whisper transcription...")
+            print("Falling back to Whisper...")
             try:
                 result = get_transcript_whisper(video_id)
                 return result, "whisper"
-            except Exception as whisper_error:
-                raise Exception(
-                    f"Captions failed ({caption_error}) and "
-                    f"Whisper also failed ({whisper_error})"
-                )
+            except Exception as w_err:
+                raise Exception(f"Both failed — Captions: {caption_error}, Whisper: {w_err}")
         elif not WHISPER_AVAILABLE:
             raise Exception(
-                "This video has no captions available. "
-                "On the server, only videos with YouTube captions work. "
-                "Please try a video with captions enabled."
+                f"Caption error on server: {str(caption_error)[:200]}. "
+                "Please try a video with YouTube captions enabled."
             )
         else:
             raise Exception(
-                "This video has no captions and is too long for Whisper (max 15 min). "
+                "No captions available and video too long for Whisper. "
                 "Please try a video with captions enabled."
             )
 
