@@ -190,7 +190,7 @@ def get_transcript(video_id, duration_seconds):
         print(f"All caption methods failed: {caption_err}")
 
         # Whisper fallback — local only, short videos only
-        if WHISPER_AVAILABLE and duration_seconds and duration_seconds <= 900:
+        if WHISPER_AVAILABLE and (duration_seconds is None or duration_seconds == 0 or duration_seconds <= 900):
             print("Trying Whisper fallback...")
             try:
                 return get_transcript_whisper(video_id), "whisper"
